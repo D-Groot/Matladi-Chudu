@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Matladi Chudu Speak See</title>
+    <title>MATLADI CHUDU, Speak and See</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@300;400;600&family=Manrope:wght@300;400;500;600&display=swap" rel="stylesheet">
@@ -364,6 +364,36 @@
 
         textarea { min-height: 100px; }
 
+        .manual-transcript {
+            margin-top: 18px;
+        }
+
+        .manual-transcript label {
+            font-size: 12px;
+            color: var(--muted);
+            margin-bottom: 8px;
+            display: block;
+        }
+
+        .manual-transcript textarea {
+            min-height: 120px;
+        }
+
+        .log-item .transcript-preview,
+        .log-item .reflection-note {
+            display: block;
+            margin-top: 8px;
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .footer {
+            margin-top: 24px;
+            text-align: center;
+            color: var(--muted);
+            font-size: 13px;
+        }
+
         .pill {
             display: inline-flex;
             align-items: center;
@@ -455,6 +485,10 @@
                             Save audio
                         </button>
                     </div>
+                    <div class="manual-transcript">
+                        <label for="manualTranscript">Transcript</label>
+                        <textarea id="manualTranscript" placeholder="Transcript captured from your practice will appear here. You can edit it before saving."></textarea>
+                    </div>
                     <div class="visualizer">
                         <canvas id="visualizer"></canvas>
                     </div>
@@ -501,6 +535,14 @@
                     <div class="analysis-card">
                         <h3>Energy level</h3>
                         <p id="energyLevel">Volume consistency appears here.</p>
+                    </div>
+                    <div class="analysis-card">
+                        <h3>Filler words</h3>
+                        <p id="fillerAnalysis">Transcripts will reveal repeated words and phrases.</p>
+                    </div>
+                    <div class="analysis-card">
+                        <h3>Last transcript</h3>
+                        <p id="lastTranscript">Transcript appears here after your recording.</p>
                     </div>
                     <div class="analysis-card">
                         <h3>Streak score</h3>
@@ -568,6 +610,8 @@
         const clarityScore = document.getElementById("clarityScore");
         const pauseRatio = document.getElementById("pauseRatio");
         const energyLevel = document.getElementById("energyLevel");
+        const fillerAnalysis = document.getElementById("fillerAnalysis");
+        const lastTranscript = document.getElementById("lastTranscript");
         const streakScore = document.getElementById("streakScore");
         const trendScore = document.getElementById("trendScore");
         const improvementGraph = document.getElementById("improvementGraph");
@@ -578,6 +622,7 @@
         const reflectionStatus = document.getElementById("reflectionStatus");
         const notes = document.getElementById("notes");
         const focus = document.getElementById("focus");
+        const manualTranscript = document.getElementById("manualTranscript");
 
         let mediaRecorder;
         let audioChunks = [];
@@ -591,8 +636,11 @@
         let animationId;
 
         const GOAL_SECONDS = 300;
+        const fillerWords = ["um", "umm", "uh", "you know", "like", "ok", "okay", "right", "actually", "so", "i mean", "you see"];
         const savedSessions = JSON.parse(localStorage.getItem("calmspeak_sessions") || "[]");
         const savedReflections = JSON.parse(localStorage.getItem("calmspeak_reflections") || "{}");
+        let recognition = null;
+        let transcript = "";
 
         const formatTime = (totalSeconds) => {
             const minutes = Math.floor(totalSeconds / 60).toString().padStart(2, "0");
@@ -605,6 +653,71 @@
             timerEl.textContent = formatTime(elapsed);
         };
 
+        const setupSpeechRecognition = () => {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) {
+                if (manualTranscript) {
+                    manualTranscript.placeholder = "Speech recognition is not supported in this browser. You can type the transcript manually.";
+                }
+                return null;
+            }
+
+            const recognizer = new SpeechRecognition();
+            recognizer.continuous = true;
+            recognizer.interimResults = true;
+            recognizer.lang = "en-US";
+            recognizer.onresult = (event) => {
+                transcript = Array.from(event.results)
+                    .map((result) => result[0].transcript)
+                    .join(" ");
+                if (manualTranscript) {
+                    manualTranscript.value = transcript;
+                }
+            };
+            recognizer.onerror = () => {
+                // Keep recording even if live transcript fails.
+            };
+            recognizer.onend = () => {
+                if (mediaRecorder && mediaRecorder.state === "recording") {
+                    recognizer.start();
+                }
+            };
+            return recognizer;
+        };
+
+        const analyzeTranscript = (text) => {
+            const cleaned = (text || "").toLowerCase();
+            if (!cleaned.trim()) {
+                return {
+                    count: 0,
+                    message: "Transcript not captured yet. Try speaking clearly or add text manually."
+                };
+            }
+
+            const found = [];
+            fillerWords.forEach((word) => {
+                const escaped = word.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&");
+                const regex = new RegExp(`\\b${escaped}\\b`, "gi");
+                const matches = cleaned.match(regex);
+                if (matches) {
+                    found.push(...matches.map(() => word));
+                }
+            });
+
+            if (!found.length) {
+                return {
+                    count: 0,
+                    message: "No major filler words detected. Keep your practice clear and confident."
+                };
+            }
+
+            const unique = [...new Set(found)];
+            return {
+                count: found.length,
+                message: `Watch out for ${unique.join(", ")}. Pause instead of filling space.`
+            };
+        };
+
         const renderSessions = () => {
             sessionLog.innerHTML = "";
             if (!savedSessions.length) {
@@ -612,6 +725,19 @@
                 return;
             }
             savedSessions.slice(0, 5).forEach((session) => {
+                const transcriptPreview = session.transcript
+                    ? `${session.transcript.slice(0, 120)}${session.transcript.length > 120 ? "..." : ""}`
+                    : "Transcript not available for this session.";
+                const reflectionSnippet = session.reflectionNotes
+                    ? `<p class=\"reflection-note\">Reflection: ${session.reflectionNotes}</p>`
+                    : "";
+                const focusSnippet = session.focusNotes
+                    ? `<p class=\"reflection-note\">Next focus: ${session.focusNotes}</p>`
+                    : "";
+                const fillerDetail = session.suggestions
+                    ? `${session.fillerCount || 0} filler word(s) - ${session.suggestions}`
+                    : "No filler word analysis available.";
+
                 const item = document.createElement("div");
                 item.className = "log-item";
                 item.innerHTML = `
@@ -619,6 +745,10 @@
                         <strong>${session.date}</strong>
                         <span>Duration: ${formatTime(session.duration)}</span>
                         <span>${session.score ? `Score: ${session.score}/100` : ""}</span>
+                        <p class=\"transcript-preview\">Transcript: ${transcriptPreview}</p>
+                        <p class=\"transcript-preview\">${fillerDetail}</p>
+                        ${reflectionSnippet}
+                        ${focusSnippet}
                     </div>
                     <span>${session.goalMet ? "Goal met" : "Below goal"}</span>
                 `;
@@ -675,7 +805,7 @@
             }
         };
 
-        const analyzeAudio = async () => {
+        const analyzeAudio = async (transcriptText = "") => {
             if (!audioBlob) return null;
             const arrayBuffer = await audioBlob.arrayBuffer();
             const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -695,14 +825,26 @@
             const rms = Math.sqrt(sumSquares / data.length);
             const silenceRatio = silentSamples / data.length;
             const clarity = Math.max(40, Math.min(100, Math.round(rms * 260 + (1 - silenceRatio) * 40)));
-            const sessionScore = Math.min(100, Math.round((clarity + (1 - silenceRatio) * 30 + Math.min(100, rms * 250)) / 2));
+            const transcriptResult = analyzeTranscript(transcriptText || manualTranscript.value || transcript);
+            const fillerPenalty = Math.min(20, transcriptResult.count * 4);
+            const sessionScore = Math.min(100, Math.max(0, Math.round((clarity + (1 - silenceRatio) * 30 + Math.min(100, rms * 250)) / 2 - fillerPenalty)));
 
             clarityScore.textContent = `${clarity}/100 - steady breath and clear sound.`;
             pauseRatio.textContent = `${Math.round(silenceRatio * 100)}% silence - balance with purposeful pauses.`;
             energyLevel.textContent = `${Math.round(rms * 180)} average energy - keep it even and relaxed.`;
+            fillerAnalysis.textContent = `${transcriptResult.count} filler word(s) found - ${transcriptResult.message}`;
+            lastTranscript.textContent = transcriptText || manualTranscript.value || transcript || "Transcript not captured yet.";
 
             ctx.close();
-            return { clarity, silenceRatio, energy: Math.round(rms * 100), sessionScore };
+            return {
+                clarity,
+                silenceRatio,
+                energy: Math.round(rms * 100),
+                sessionScore,
+                fillerCount: transcriptResult.count,
+                suggestions: transcriptResult.message,
+                transcript: transcriptText || manualTranscript.value || transcript || "Transcript not captured."
+            };
         };
 
         const saveSession = (duration, metrics = {}) => {
@@ -713,7 +855,12 @@
                 clarity: metrics.clarity || null,
                 silenceRatio: metrics.silenceRatio || null,
                 energy: metrics.energy || null,
-                score: metrics.sessionScore || null
+                score: metrics.sessionScore || null,
+                transcript: metrics.transcript || "Transcript not captured.",
+                fillerCount: metrics.fillerCount || 0,
+                suggestions: metrics.suggestions || "",
+                reflectionNotes: "",
+                focusNotes: ""
             };
             savedSessions.unshift(entry);
             localStorage.setItem("calmspeak_sessions", JSON.stringify(savedSessions.slice(0, 10)));
@@ -722,6 +869,20 @@
         };
 
         const handleStart = async () => {
+            transcript = "";
+            if (manualTranscript) {
+                manualTranscript.value = "";
+            }
+            if (fillerAnalysis) {
+                fillerAnalysis.textContent = "Listening for filler words...";
+            }
+            if (lastTranscript) {
+                lastTranscript.textContent = "Auto-generated transcript will appear after recording.";
+            }
+            recognition = setupSpeechRecognition();
+            if (recognition) {
+                recognition.start();
+            }
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             mediaRecorder = new MediaRecorder(stream);
             audioChunks = [];
@@ -732,13 +893,18 @@
 
             mediaRecorder.ondataavailable = (event) => audioChunks.push(event.data);
             mediaRecorder.onstop = async () => {
+                if (recognition) {
+                    recognition.onend = null;
+                    recognition.stop();
+                }
                 audioBlob = new Blob(audioChunks, { type: "audio/webm" });
                 audioUrl = URL.createObjectURL(audioBlob);
                 const duration = Math.floor((Date.now() - startTime) / 1000);
                 durationLabel.textContent = formatTime(duration);
                 const goalMet = duration >= GOAL_SECONDS;
                 goalLabel.textContent = goalMet ? "Goal met" : "Below goal";
-                const metrics = await analyzeAudio();
+                const transcriptText = manualTranscript.value.trim() || transcript || "Transcript not captured.";
+                const metrics = await analyzeAudio(transcriptText);
                 saveSession(duration, metrics);
                 playBtn.disabled = false;
                 downloadBtn.disabled = false;
@@ -757,6 +923,10 @@
             if (mediaRecorder && mediaRecorder.state === "recording") {
                 mediaRecorder.stop();
                 mediaRecorder.stream.getTracks().forEach((track) => track.stop());
+            }
+            if (recognition) {
+                recognition.onend = null;
+                recognition.stop();
             }
             clearInterval(timerInterval);
             stopVisualizer();
@@ -811,19 +981,25 @@
             if (savedSessions.length < 4) {
                 return "Record at least 4 sessions to track improvement.";
             }
+            const scoreValue = (entry) => {
+                if (typeof entry.score === "number") {
+                    return entry.score;
+                }
+                return Math.round((entry.duration / GOAL_SECONDS) * 100);
+            };
+            const average = (arr) => arr.reduce((sum, entry) => sum + scoreValue(entry), 0) / arr.length;
             const recent = savedSessions.slice(0, 3);
             const previous = savedSessions.slice(3, 6);
-            const average = (arr) => arr.reduce((sum, entry) => sum + entry.duration, 0) / arr.length;
             const recentAvg = average(recent);
             const previousAvg = average(previous);
             const delta = Math.round(recentAvg - previousAvg);
             if (delta > 0) {
-                return `+${delta}s improvement over last 3 sessions.`;
+                return `+${delta} point improvement over the last 3 sessions.`;
             }
             if (delta < 0) {
-                return `${Math.abs(delta)}s slower than the prior sessions.`;
+                return `${Math.abs(delta)} points behind your previous sessions.`;
             }
-            return "Your pace is steady. Keep the practice going.";
+            return "Your sessions are consistent. Keep the practice going.";
         };
 
         const drawImprovementGraph = () => {
@@ -834,7 +1010,7 @@
             const height = 220;
             improvementGraph.width = width;
             improvementGraph.height = height;
-            const maxDuration = Math.max(GOAL_SECONDS, ...points.map((session) => session.duration));
+            const maxScore = 100;
             const barWidth = (width - padding * 2) / Math.max(points.length, 1) - 12;
 
             ctx.clearRect(0, 0, width, height);
@@ -843,23 +1019,25 @@
             ctx.strokeStyle = "#d8dbd8";
             ctx.lineWidth = 1;
             ctx.beginPath();
-            const goalY = padding + ((height - padding * 2) * (1 - GOAL_SECONDS / maxDuration));
+            const goalLine = 80;
+            const goalY = padding + ((height - padding * 2) * (1 - goalLine / maxScore));
             ctx.moveTo(padding, goalY);
             ctx.lineTo(width - padding, goalY);
             ctx.stroke();
             ctx.fillStyle = "#5f7b76";
             ctx.font = "12px Manrope, sans-serif";
-            ctx.fillText("Goal 5:00", width - padding - 60, goalY - 8);
+            ctx.fillText("Target 80", width - padding - 60, goalY - 8);
 
             points.forEach((session, index) => {
+                const value = typeof session.score === "number" ? session.score : Math.round((session.duration / GOAL_SECONDS) * 100);
                 const x = padding + index * (barWidth + 12);
-                const barHeight = ((height - padding * 2) * (session.duration / maxDuration));
+                const barHeight = ((height - padding * 2) * (value / maxScore));
                 const y = height - padding - barHeight;
-                ctx.fillStyle = session.duration >= GOAL_SECONDS ? "#6a8b89" : "#c8842e";
+                ctx.fillStyle = value >= 80 ? "#6a8b89" : "#c8842e";
                 ctx.fillRect(x, y, barWidth, barHeight);
                 ctx.fillStyle = "#1f2a2e";
                 ctx.font = "11px Manrope, sans-serif";
-                ctx.fillText(formatTime(session.duration), x, Math.max(18, y - 6));
+                ctx.fillText(`${value} pts`, x, Math.max(18, y - 6));
                 const dateLabel = new Date(session.date).toLocaleDateString(undefined, { weekday: "short" });
                 ctx.fillText(dateLabel, x, height - padding + 16);
             });
@@ -869,9 +1047,18 @@
             const streak = calculateStreak();
             streakScore.textContent = streak > 0 ? `${streak} day streak - keep the habit alive.` : "No streak yet. Start a session today.";
             trendScore.textContent = calculateTrend();
+
             if (savedSessions.length) {
+                const latest = savedSessions[0];
+                clarityScore.textContent = latest.clarity ? `${latest.clarity}/100 - steady breath and clear sound.` : clarityScore.textContent;
+                pauseRatio.textContent = latest.silenceRatio ? `${Math.round(latest.silenceRatio * 100)}% silence - balance with purposeful pauses.` : pauseRatio.textContent;
+                energyLevel.textContent = latest.energy ? `${latest.energy} average energy - keep it even and relaxed.` : energyLevel.textContent;
+                fillerAnalysis.textContent = latest.suggestions ? `${latest.fillerCount} filler word(s) found - ${latest.suggestions}` : "No filler words detected yet.";
+                lastTranscript.textContent = latest.transcript || "Transcript will appear here after your first session.";
                 drawImprovementGraph();
             } else {
+                fillerAnalysis.textContent = "Record a session to analyze filler words and transcripts.";
+                lastTranscript.textContent = "Transcript appears here after your recording.";
                 const ctx = improvementGraph.getContext("2d");
                 ctx.clearRect(0, 0, improvementGraph.width, improvementGraph.height);
                 ctx.fillStyle = "#f5f4f2";
@@ -883,11 +1070,22 @@
         };
 
         const handleSaveReflection = () => {
-            savedReflections[Date.now()] = {
-                notes: notes.value,
-                focus: focus.value
+            const reflectionEntry = {
+                notes: notes.value.trim(),
+                focus: focus.value.trim()
             };
+            const timestamp = Date.now();
+            savedReflections[timestamp] = reflectionEntry;
             localStorage.setItem("calmspeak_reflections", JSON.stringify(savedReflections));
+
+            if (savedSessions.length) {
+                savedSessions[0].reflectionNotes = reflectionEntry.notes;
+                savedSessions[0].focusNotes = reflectionEntry.focus;
+                localStorage.setItem("calmspeak_sessions", JSON.stringify(savedSessions.slice(0, 10)));
+                renderSessions();
+                renderInsights();
+            }
+
             reflectionStatus.textContent = "Reflection saved locally. Keep your next session focused on one change.";
         };
 
@@ -912,5 +1110,7 @@
         renderInsights();
         lucide.createIcons();
     </script>
+    <footer class="footer"><b>© 2026 MATLADI CHUDU . All rights reserved.</b>
+    <footer class="footer"><b>Built with ❤ by Shiva for everyone</b></footer>                     
 </body>
 </html>
