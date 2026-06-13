@@ -674,7 +674,9 @@
         let animationId;
 
         const GOAL_SECONDS = 300;
-        const DEEPGRAM_API_KEY = "792491989c61ff3a437217f70e604620aa218106";
+        // The API key is now configured to be read from a global ENV object if available.
+        // For local development, you can use a .env file and a local server that injects these.
+        const DEEPGRAM_API_KEY = window.ENV?.DEEPGRAM_API_KEY || "792491989c61ff3a437217f70e604620aa218106";
         const fillerWords = ["um", "umm", "uh", "you know", "like", "ok", "okay", "right", "actually", "so", "i mean", "you see"];
         const commonVocabTop100 = ["the", "be", "to", "of", "and", "a", "in", "that", "have", "i", "it", "for", "not", "on", "with", "he", "as", "you", "do", "at", "this", "but", "his", "by", "from", "they", "we", "say", "her", "she", "or", "an", "will", "my", "one", "all", "would", "there", "their", "what", "so", "up", "out", "if", "about", "who", "get", "which", "go", "me", "when", "make", "can", "like", "time", "no", "just", "him", "know", "take", "people", "into", "year", "your", "good", "some", "could", "them", "see", "other", "than", "then", "now", "look", "only", "come", "its", "over", "think", "also", "back", "after", "use", "two", "how", "our", "work", "first", "well", "way", "even", "new", "want", "because", "any", "these", "give", "day", "most", "us", "is", "was", "are", "been", "has"];
         const savedSessions = JSON.parse(localStorage.getItem("calmspeak_sessions") || "[]");
